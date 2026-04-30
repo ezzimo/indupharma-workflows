@@ -1,0 +1,3272 @@
+[
+  {
+    "_id": "69f0944c65ba93c1d2d68056",
+    "name": "INDUPHARMA Fusion Workflows",
+    "variables": {},
+    "secrets": {},
+    "nodes": [
+      {
+        "position": {
+          "x": 100,
+          "y": 300
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "ca77a210-41cd-4e43-858f-ed5933e87d26",
+        "type": "trigger",
+        "data": {
+          "description": "Souscrit à HiveMQ sur tous les topics équipements pharma",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "mqtt-subscriber",
+          "label": "MQTT_Subscriber",
+          "inputs": {},
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "clientId": "mqtt_fusion_indupharma_001",
+            "brokerUrl": "mqtts://......s1.eu.hivemq.cloud:8883",
+            "topic": "indupharma/mesures",
+            "username": "ezzimo",
+            "password": "...."
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 300,
+          "y": 300
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "e9ceab8f-3a3e-462c-ab29-1f29eaa85b30",
+        "type": "action",
+        "data": {
+          "description": "Extrait code_machine, type_mesure et valeur depuis le topic et payload MQTT",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "function",
+          "label": "Parse_Message",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "code": "const data         = input.message;\nconst parts = (input.topic || '').split('/');\nconst code_machine = data.code_machine;\nconst type_mesure  = data.type_mesure;\nconst valeur       = parseFloat(data.valeur);\nconst unite        = data.unite    || '';\nconst esp32_id     = data.esp32_id || null;\n\nif (data.valeur === undefined || data.valeur === null) {\n  throw new Error('Payload invalide — valeur manquante : ' + code_machine + '/' + type_mesure);\n}\n\nreturn {\n  code_machine,\n  type_mesure,\n  valeur:    parseFloat(data.valeur),\n  unite:     data.unite    || '',\n  esp32_id:  data.esp32_id || null,\n  timestamp: new Date().toISOString()\n};"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 515.9999996694817,
+          "y": 284.00000033051833
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "d7cddb1b-33b2-4acc-bc23-565190201e70",
+        "type": "action",
+        "data": {
+          "description": "Récupère config équipement + seuils GMP depuis Supabase",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "postgres action",
+          "label": "Lookup_Equipement",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "port": 6543,
+            "schemaName": "public",
+            "connectionTimeoutMillis": 5000,
+            "host": "aws-1-eu-west-2.pooler.supabase.com",
+            "database": "postgres",
+            "user": "postgres....",
+            "password": "......",
+            "operation": "Execute SQL query",
+            "executeQueryParams": {
+              "query": "SELECT      e.id AS equipement_id,     e.code_machine,     e.nom AS nom_equipement,     e.criticite_gmp,     c.id AS capteur_id,     sc.seuil_min,     sc.seuil_max,     sc.unite FROM equipements e JOIN capteurs c      ON c.equipement_id = e.id      AND c.topic_mqtt = e.code_machine || '/' || '{{outputs.Parse_Message.success.type_mesure}}' JOIN seuils_config sc      ON sc.equipement_id = e.id      AND sc.type_mesure = '{{outputs.Parse_Message.success.type_mesure}}' WHERE e.code_machine = '{{outputs.Parse_Message.success.code_machine}}'   AND c.actif = true LIMIT 1;"
+            },
+            "tableName": "equipements "
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 700,
+          "y": 300
+        },
+        "width": 64,
+        "height": 64,
+        "selected": true,
+        "id": "bcc41c99-5708-4979-b529-88a4f29f15b3",
+        "type": "action",
+        "data": {
+          "description": "Compare la mesure aux seuils GMP et produit alerte_flag",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "function",
+          "label": "Verifier_Seuils",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "code": "const row = input.rows[0];\nif (!row) throw new Error('Équipement ou capteur introuvable: {{outputs.Parse_Message.success.code_machine}}/{{outputs.Parse_Message.success.type_mesure}}');\n\nconst valeur   = {{outputs.Parse_Message.success.valeur}};\nconst seuilMin = parseFloat(row.seuil_min);\nconst seuilMax = parseFloat(row.seuil_max);\n\nreturn {\n  capteur_id:     row.capteur_id,\n  equipement_id:  row.equipement_id,\n  code_machine:   row.code_machine,\n  nom_equipement: row.nom_equipement,\n  criticite_gmp:  row.criticite_gmp,\n  type_mesure:    '{{outputs.Parse_Message.success.type_mesure}}',\n  valeur,\n  unite:          row.unite,\n  seuil_min:      seuilMin,\n  seuil_max:      seuilMax,\n  alerte_flag:    valeur == 300, //valeur < seuilMin || valeur > seuilMax,\n  timestamp:      '{{outputs.Parse_Message.success.timestamp}}'\n};"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 912.397077215787,
+          "y": 301.85956158236803
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "e8a5eaa7-4e75-4c92-829c-1e63d9bceba9",
+        "type": "action",
+        "data": {
+          "description": "Insère la mesure validée dans la table Supabase mesures",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "postgres action",
+          "label": "INSERT_Mesure",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "port": 6543,
+            "schemaName": "public",
+            "connectionTimeoutMillis": 5000,
+            "host": "aws-1-eu-west-2.pooler.supabase.com",
+            "database": "postgres",
+            "user": "postgres....",
+            "password": "...",
+            "operation": "Execute SQL query",
+            "executeQueryParams": {
+              "query": "INSERT INTO mesures (capteur_id, type_mesure, valeur, unite, alerte_flag, timestamp) VALUES ('{{outputs.Verifier_Seuils.success.capteur_id}}', '{{outputs.Verifier_Seuils.success.type_mesure}}', {{outputs.Verifier_Seuils.success.valeur}}, '{{outputs.Verifier_Seuils.success.unite}}', {{outputs.Verifier_Seuils.success.alerte_flag}}, '{{outputs.Verifier_Seuils.success.timestamp}}')"
+            },
+            "tableName": "mesures ",
+            "replaceEmptyStringWithNull": false,
+            "selectParams": {
+              "returnAll": false
+            },
+            "insertParams": {
+              "skipOnConflict": false
+            },
+            "deleteParams": {
+              "cascade": false
+            }
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 1100,
+          "y": 340
+        },
+        "width": 64,
+        "height": 68,
+        "selected": false,
+        "id": "bdd2b337-9f97-420d-9845-01b694fa5cc4",
+        "type": "utility",
+        "data": {
+          "description": "Route vers WF-02 si alerte_flag est vrai",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "if-else",
+          "label": "Alerte_Detectee",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "true": {
+              "label": "True",
+              "isConnectable": null
+            },
+            "false": {
+              "label": "False",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "condition": "outputs.Verifier_Seuils.success.alerte_flag === true"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 1320,
+          "y": 240
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "841fbbb9-57a3-4b1e-9fc3-932fedacaf99",
+        "type": "action",
+        "data": {
+          "description": "Appelle le webhook WF-02 avec le contexte de l'anomalie détectée",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "http-request",
+          "label": "Declencher_WF02",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "url": "https://fusion-ai-api.medifus.dev/webhooks/webhook-nvik39q3pjy078mpufsl0264/wf-02-anomalie",
+            "method": "POST",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "equipement_id": "{{outputs.Verifier_Seuils.success.equipement_id}}",
+              "capteur_id": "{{outputs.Verifier_Seuils.success.capteur_id}}",
+              "code_machine": "{{outputs.Verifier_Seuils.success.code_machine}}",
+              "nom_equipement": "{{outputs.Verifier_Seuils.success.nom_equipement}}",
+              "criticite_gmp": "{{outputs.Verifier_Seuils.success.criticite_gmp}}",
+              "type_mesure": "{{outputs.Verifier_Seuils.success.type_mesure}}",
+              "valeur": "{{outputs.Verifier_Seuils.success.valeur}}",
+              "unite": "{{outputs.Verifier_Seuils.success.unite}}",
+              "seuil_min": "{{outputs.Verifier_Seuils.success.seuil_min}}",
+              "seuil_max": "{{outputs.Verifier_Seuils.success.seuil_max}}",
+              "timestamp": "{{outputs.Verifier_Seuils.success.timestamp}}"
+            }
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 117.59423537261233,
+          "y": 641.6465155067084
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "nvik39q3pjy078mpufsl0264",
+        "type": "trigger",
+        "data": {
+          "description": "Reçoit le contexte d'anomalie envoyé par WF-01",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "webhook",
+          "label": "WF02_Webhook",
+          "inputs": {},
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "method": "post",
+            "respondType": "deferred",
+            "responseCode": 200,
+            "path": "/wf-02-anomalie"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 390.1189885123211,
+          "y": 665.9150465485412
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "ytwf1d2voo4e4udygq5bknl1",
+        "type": "action",
+        "data": {
+          "description": "Lit l'historique des 30 dernières minutes pour cet équipement",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "postgres action",
+          "label": "SELECT_Historique",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "port": 6543,
+            "schemaName": "public",
+            "connectionTimeoutMillis": 5000,
+            "host": "aws-1-eu-west-2.pooler.supabase.com",
+            "database": "postgres",
+            "user": "postgres....",
+            "password": "...",
+            "operation": "Execute SQL query",
+            "executeQueryParams": {
+              "query": "SELECT CAST(m.timestamp AS text) AS timestamp, m.type_mesure, m.valeur, m.alerte_flag FROM mesures m JOIN capteurs c ON c.id = m.capteur_id WHERE c.equipement_id = '{{outputs.WF02_Webhook.success.body.equipement_id}}' AND m.type_mesure = '{{outputs.WF02_Webhook.success.body.type_mesure}}' AND m.timestamp >= NOW() - INTERVAL '30 minutes' ORDER BY m.timestamp ASC"
+            },
+            "tableName": "mesures "
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 541.5942353726123,
+          "y": 665.6465155067084
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "dncyfrc5j6xcwr40dz4k885i",
+        "type": "action",
+        "data": {
+          "description": "Calcule tendance, delta et nb alertes sur la fenêtre de 30 min",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "function",
+          "label": "Analyse_Tendance",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "code": "const mesures = input.rows || [];\n\n// ── Webhook data : injecté champ par champ (syntaxe Fusion AI compatible) ──\nconst wh = {\n    equipement_id:       '{{outputs.WF02_Webhook.success.body.equipement_id}}',\n    capteur_id:          '{{outputs.WF02_Webhook.success.body.capteur_id}}',\n    code_machine:        '{{outputs.WF02_Webhook.success.body.code_machine}}',\n    nom_equipement:      '{{outputs.WF02_Webhook.success.body.nom_equipement}}',\n    criticite_gmp:       '{{outputs.WF02_Webhook.success.body.criticite_gmp}}',\n    type_mesure:         '{{outputs.WF02_Webhook.success.body.type_mesure}}',\n    valeur:              parseFloat('{{outputs.WF02_Webhook.success.body.valeur}}') || 0,\n    unite:               '{{outputs.WF02_Webhook.success.body.unite}}',\n    seuil_min:           parseFloat('{{outputs.WF02_Webhook.success.body.seuil_min}}') || 0,\n    seuil_max:           parseFloat('{{outputs.WF02_Webhook.success.body.seuil_max}}') || 0,\n    timestamp:           '{{outputs.WF02_Webhook.success.body.timestamp}}'\n};\n\n// ── Helper : parse un timestamp PostgreSQL \"2026-04-29 20:44:17.072+00\" ──\nfunction safeDate(ts) {\n    if (!ts) return null;\n    const iso = String(ts).replace(' ', 'T');\n    const d = new Date(iso);\n    return isNaN(d.getTime()) ? null : d;\n}\n\n// ── Extraction des valeurs ──\nconst valeurs = mesures\n    .map(m => parseFloat(m.valeur))\n    .filter(v => !isNaN(v));\n\nconst nb_alertes = mesures.filter(m => m.alerte_flag === true).length;\n\n// ── Delta (valeur finale - valeur initiale) ──\nlet delta = 0;\nif (valeurs.length >= 2) {\n    delta = parseFloat((valeurs[valeurs.length - 1] - valeurs[0]).toFixed(2));\n}\n\n// ── Durée en minutes ──\nlet duree_min = 0;\nif (mesures.length >= 2) {\n    const t0 = safeDate(mesures[0].timestamp);\n    const t1 = safeDate(mesures[mesures.length - 1].timestamp);\n    if (t0 && t1) {\n        duree_min = (t1 - t0) / 60000;\n    }\n}\n\n// ── Classification tendance ──\nlet tendance = 'ponctuel';\nif (Math.abs(delta) > 5 && duree_min > 0) {\n    tendance = delta > 0 ? 'hausse_rapide' : 'chute_rapide';\n} else if (nb_alertes >= 3) {\n    tendance = 'persistant';\n}\n\n// ── Return ──\nreturn {\n    equipement_id:       wh.equipement_id,\n    capteur_id:          wh.capteur_id,\n    code_machine:        wh.code_machine,\n    nom_equipement:      wh.nom_equipement,\n    criticite_gmp_equip: wh.criticite_gmp,\n    type_mesure:         wh.type_mesure,\n    valeur:              wh.valeur,\n    unite:               wh.unite || '',\n    seuil_min:           wh.seuil_min,\n    seuil_max:           wh.seuil_max,\n    timestamp:           wh.timestamp,\n    tendance,\n    delta,\n    nb_alertes,\n    nb_mesures:          valeurs.length\n};"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 753.5942353726123,
+          "y": 877.6465155067084
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "o0j1lxad1jstd5w6ndce0my2",
+        "type": "agent-llm",
+        "data": {
+          "description": "Modèle Gemini pour classification GMP",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "google-llm",
+          "label": "Google_LLM_02",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "apiKey": "AIzaSyB5KJ4Jesp8mAGnDDpH8gl7s8hB_Q5jZSI",
+            "model": "gemini-3.1-flash-lite-preview"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 765.5942353726123,
+          "y": 689.6465155067084
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "z1125z5l853vwzl4h01y5k6i",
+        "type": "agent",
+        "data": {
+          "description": "Classifie la criticité GMP selon tendance, équipement et écart seuil",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "agent",
+          "label": "Agent_Criticite_GMP",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "threadId": "indupharma_gmp_classification",
+            "systemPrompt": "Tu es un expert en conformité GMP pharmaceutique.\n\nDonnées de l'anomalie:\n- Équipement: {{outputs.Analyse_Tendance.success.code_machine}} ({{outputs.Analyse_Tendance.success.nom_equipement}})\n- Criticité équipement: {{outputs.Analyse_Tendance.success.criticite_gmp_equip}}\n- Mesure: {{outputs.Analyse_Tendance.success.type_mesure}} = {{outputs.Analyse_Tendance.success.valeur}} {{outputs.Analyse_Tendance.success.unite}}\n- Seuils: [{{outputs.Analyse_Tendance.success.seuil_min}} — {{outputs.Analyse_Tendance.success.seuil_max}}]\n- Tendance: {{outputs.Analyse_Tendance.success.tendance}}\n- Delta 30 min: {{outputs.Analyse_Tendance.success.delta}}\n- Nb alertes: {{outputs.Analyse_Tendance.success.nb_alertes}}\n\nRègle: GMP_critique si équipement critique + tendance persistante/rapide. majeur si confirmée. mineur si isolée.\n\nRéponds UNIQUEMENT par un JSON:\n{\"criticite_finale\": \"GMP_critique|majeur|mineur\", \"lot_impacte\": \"LOT-XXXXX ou null\", \"message_alerte\": \"description courte\"}"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 977.5942353726123,
+          "y": 701.6465155067084
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "l1ktyqzavk8rm64zhhipgp75",
+        "type": "action",
+        "data": {
+          "description": "Parse la réponse JSON de l'agent IA et enrichit le payload",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "function",
+          "label": "Parse_Reponse_IA",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "code": "let parsed = {};\ntry {\n  const raw = typeof input === 'string' ? input : JSON.stringify(input);\n  const match = raw.match(/\\{[\\s\\S]*\\}/);\n  parsed = match ? JSON.parse(match[0]) : {};\n} catch(e) {\n  parsed = { criticite_finale: 'majeur', lot_impacte: null, message_alerte: 'Anomalie — classification manuelle requise' };\n}\n\nconst code = '{{outputs.Analyse_Tendance.success.code_machine}}';\nconst criticite = parsed.criticite_finale || 'majeur';\nconst lot = criticite === 'GMP_critique'\n  ? (parsed.lot_impacte || 'LOT-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + code.toUpperCase())\n  : null;\n\nreturn {\n  equipement_id:  '{{outputs.Analyse_Tendance.success.equipement_id}}',\n  code_machine:   code,\n  nom_equipement: '{{outputs.Analyse_Tendance.success.nom_equipement}}',\n  type_mesure:    '{{outputs.Analyse_Tendance.success.type_mesure}}',\n  valeur:         {{outputs.Analyse_Tendance.success.valeur}},\n  unite:          '{{outputs.Analyse_Tendance.success.unite}}',\n  seuil_min:      {{outputs.Analyse_Tendance.success.seuil_min}},\n  seuil_max:      {{outputs.Analyse_Tendance.success.seuil_max}},\n  timestamp:      '{{outputs.Analyse_Tendance.success.timestamp}}',\n  criticite_finale: criticite,\n  lot_impacte:      lot,\n  message_alerte:   parsed.message_alerte || 'Anomalie sur ' + code\n};"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 1189.5942353726123,
+          "y": 713.6465155067084
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "dmbk0q9gq3dgp9lf2pqk4dn1",
+        "type": "action",
+        "data": {
+          "description": "Insère l'alerte GMP qualifiée dans la table Supabase alertes",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "postgres action",
+          "label": "INSERT_Alerte",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "port": 6543,
+            "schemaName": "public",
+            "connectionTimeoutMillis": 5000,
+            "host": "aws-1-eu-west-2.pooler.supabase.com",
+            "database": "postgres",
+            "user": "postgres....",
+            "password": "...",
+            "operation": "Execute SQL query",
+            "executeQueryParams": {
+              "query": "INSERT INTO alertes (equipement_id, type_anomalie, valeur_detectee, seuil_ref, criticite_gmp, lot_impacte, message, statut, timestamp) VALUES ('{{outputs.Parse_Reponse_IA.success.equipement_id}}', '{{outputs.Parse_Reponse_IA.success.type_mesure}}_hors_seuil', {{outputs.Parse_Reponse_IA.success.valeur}}, {{outputs.Parse_Reponse_IA.success.seuil_max}}, '{{outputs.Parse_Reponse_IA.success.criticite_finale}}', '{{outputs.Parse_Reponse_IA.success.lot_impacte}}', '{{outputs.Parse_Reponse_IA.success.message_alerte}}', 'ouverte', '{{outputs.Parse_Reponse_IA.success.timestamp}}') RETURNING id"
+            },
+            "tableName": "alertes ",
+            "replaceEmptyStringWithNull": false,
+            "selectParams": {
+              "returnAll": false
+            },
+            "insertParams": {
+              "skipOnConflict": false
+            },
+            "deleteParams": {
+              "cascade": false
+            }
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 1413.5942353726123,
+          "y": 797.6465155067084
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "d15uydezzr3maiwvwbdhdtdp",
+        "type": "action",
+        "data": {
+          "description": "Appelle le webhook WF-03 pour déclencher les notifications",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "http-request",
+          "label": "Declencher_WF03",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "url": "https://fusion-ai-api.medifus.dev/webhooks/webhook-x82gbx6laugwavpwvuoa2z2z/wf-03-notification",
+            "method": "POST",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "alerte_id": "{{outputs.INSERT_Alerte.success.rows.0.id}}",
+              "equipement_id": "{{outputs.Parse_Reponse_IA.success.equipement_id}}",
+              "code_machine": "{{outputs.Parse_Reponse_IA.success.code_machine}}",
+              "nom_equipement": "{{outputs.Parse_Reponse_IA.success.nom_equipement}}",
+              "criticite_gmp": "{{outputs.Parse_Reponse_IA.success.criticite_finale}}",
+              "type_mesure": "{{outputs.Parse_Reponse_IA.success.type_mesure}}",
+              "valeur": "{{outputs.Parse_Reponse_IA.success.valeur}}",
+              "unite": "{{outputs.Parse_Reponse_IA.success.unite}}",
+              "lot_impacte": "{{outputs.Parse_Reponse_IA.success.lot_impacte}}",
+              "message_alerte": "{{outputs.Parse_Reponse_IA.success.message_alerte}}",
+              "timestamp": "{{outputs.Parse_Reponse_IA.success.timestamp}}"
+            }
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 21.893753124551267,
+          "y": 1193.6664082882398
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "x82gbx6laugwavpwvuoa2z2z",
+        "type": "trigger",
+        "data": {
+          "description": "Reçoit l'alerte qualifiée envoyée par WF-02",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "webhook",
+          "label": "WF03_Webhook",
+          "inputs": {},
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "method": "post",
+            "respondType": "immediate",
+            "responseCode": 200,
+            "path": "/wf-03-notification"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 208.65431456267152,
+          "y": 1204.1817354316586
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "dk0lxlwytof069twd87h44go",
+        "type": "action",
+        "data": {
+          "description": "Enrichit le contexte avec zone_production depuis Supabase",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "postgres action",
+          "label": "Enrichir_Contexte",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "port": 6543,
+            "schemaName": "public",
+            "connectionTimeoutMillis": 5000,
+            "host": "aws-1-eu-west-2.pooler.supabase.com",
+            "database": "postgres",
+            "user": "postgres....",
+            "password": "...",
+            "operation": "Execute SQL query",
+            "executeQueryParams": {
+              "query": "SELECT e.nom AS nom_equipement, e.zone_production, e.type AS type_equipement FROM equipements e WHERE e.id = '{{outputs.WF03_Webhook.success.body.equipement_id}}'"
+            },
+            "tableName": "equipements "
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 420.6543145626715,
+          "y": 1216.1817354316586
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "ex05q8esm63va9lt8f1t289k",
+        "type": "action",
+        "data": {
+          "description": "Fusionne données webhook + Postgres en payload unifié",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "function",
+          "label": "Fusionner_Payload",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "code": "const equip = input.rows[0] || {};\n\nconst body = {\n    alerte_id:      '{{outputs.WF03_Webhook.success.body.alerte_id}}',\n    equipement_id:  '{{outputs.WF03_Webhook.success.body.equipement_id}}',\n    code_machine:   '{{outputs.WF03_Webhook.success.body.code_machine}}',\n    nom_equipement: '{{outputs.WF03_Webhook.success.body.nom_equipement}}',\n    criticite_gmp:  '{{outputs.WF03_Webhook.success.body.criticite_gmp}}',\n    type_mesure:    '{{outputs.WF03_Webhook.success.body.type_mesure}}',\n    valeur:         '{{outputs.WF03_Webhook.success.body.valeur}}',\n    unite:          '{{outputs.WF03_Webhook.success.body.unite}}',\n    lot_impacte:    '{{outputs.WF03_Webhook.success.body.lot_impacte}}',\n    message_alerte: '{{outputs.WF03_Webhook.success.body.message_alerte}}',\n    timestamp:      '{{outputs.WF03_Webhook.success.body.timestamp}}'\n};\n\nreturn {\n    alerte_id:       body.alerte_id,\n    equipement_id:   body.equipement_id,\n    code_machine:    body.code_machine,\n    nom_equipement:  equip.nom_equipement || body.nom_equipement || body.code_machine,\n    zone_production: equip.zone_production || 'Zone inconnue',\n    type_equipement: equip.type_equipement || '',\n    criticite_gmp:   body.criticite_gmp,\n    type_mesure:     body.type_mesure,\n    valeur:          body.valeur,\n    unite:           body.unite || '',\n    lot_impacte:     body.lot_impacte || null,\n    message_alerte:  body.message_alerte || ('Anomalie détectée sur ' + body.code_machine),\n    timestamp:       body.timestamp\n};"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 652.6543145626715,
+          "y": 1228.1817354316586
+        },
+        "width": 64,
+        "height": 68,
+        "selected": false,
+        "id": "bng6u23cdvcx0trrp30bjmz4",
+        "type": "utility",
+        "data": {
+          "description": "Route vers le canal de notification selon la criticité GMP",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "switch",
+          "label": "Router_Criticite",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "case-1": {
+              "label": "case-1",
+              "isConnectable": null
+            },
+            "case-2": {
+              "label": "case-2",
+              "isConnectable": null
+            },
+            "default": {
+              "label": "Default",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "inputToEvaluate": "{{outputs.Fusionner_Payload.success.criticite_gmp}}",
+            "expression": "outputs.Fusionner_Payload.success.criticite_gmp",
+            "rules": [
+              {
+                "operation": "equal",
+                "value": "GMP_critique",
+                "output": "case-1"
+              },
+              {
+                "operation": "equal",
+                "value": "majeur",
+                "output": "case-2"
+              }
+            ],
+            "cases": [
+              {
+                "value": "GMP_critique"
+              },
+              {
+                "value": "majeur"
+              }
+            ],
+            "conditions": [
+              {
+                "outputId": "case-1",
+                "condition": "input.criticite_gmp === 'GMP_critique'"
+              },
+              {
+                "outputId": "case-2",
+                "condition": "input.criticite_gmp === 'majeur'"
+              }
+            ]
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 904.6543145626715,
+          "y": 990.1817354316586
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "wbx4rfasxn812apenmazbehp",
+        "type": "action",
+        "data": {
+          "description": "Email alerte critique GMP vers responsable QA et direction",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "gmail",
+          "label": "Email_GMP_Critique",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "operation": "send",
+            "clientSe": "....",
+            "to": "ezzi.mohammed1@yahoo.fr",
+            "subject": "",
+            "html": "<h2 style='color:red'>⚠ ALERTE CRITIQUE GMP — INDUPHARMA</h2><table><tr><td><b>Équipement</b></td><td>{{outputs.Fusionner_Payload.success.nom_equipement}} ({{outputs.Fusionner_Payload.success.code_machine}})</td></tr><tr><td><b>Zone</b></td><td>{{outputs.Fusionner_Payload.success.zone_production}}</td></tr><tr><td><b>Mesure</b></td><td>{{outputs.Fusionner_Payload.success.type_mesure}} = {{outputs.Fusionner_Payload.success.valeur}} {{outputs.Fusionner_Payload.success.unite}}</td></tr><tr><td><b>Lot impacté</b></td><td>{{outputs.Fusionner_Payload.success.lot_impacte}}</td></tr><tr><td><b>Message</b></td><td>{{outputs.Fusionner_Payload.success.message_alerte}}</td></tr><tr><td><b>Horodatage</b></td><td>{{outputs.Fusionner_Payload.success.timestamp}}</td></tr></table>",
+            "attachments": []
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 1136.6543145626715,
+          "y": 1002.1817354316586
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "mn49q25rebjwsvxcg462mxol",
+        "type": "action",
+        "data": {
+          "description": "Alerte Slack canal production pour anomalie critique",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "slack-action",
+          "label": "Slack_Alerte_Critique",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "operation": "message",
+            "messageOperation": "send",
+            "text": "🚨 *CRITIQUE GMP* — {{outputs.Fusionner_Payload.success.code_machine}}\nZone: {{outputs.Fusionner_Payload.success.zone_production}}\nMesure: {{outputs.Fusionner_Payload.success.type_mesure}} = {{outputs.Fusionner_Payload.success.valeur}} {{outputs.Fusionner_Payload.success.unite}}\nLot: {{outputs.Fusionner_Payload.success.lot_impacte}}\n{{outputs.Fusionner_Payload.success.message_alerte}}",
+            "messageChannelId": "C0AMP197XUY"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 928.6543145626715,
+          "y": 1264.1817354316586
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "sqi7r4wr75ib9mka1q40nbu2",
+        "type": "action",
+        "data": {
+          "description": "Email alerte majeure vers chef de ligne de production",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "gmail",
+          "label": "Email_Alerte_Majeure",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "operation": "send",
+            "refreshToken": ".....",
+            "clientSe": "....",
+            "to": "ezzi.mohammed1@yahoo.fr",
+            "subject": "",
+            "html": "",
+            "attachments": []
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 1392.6543145626715,
+          "y": 1188.1817354316586
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "lc6a7kna2e7tfhiq62q8kjeb",
+        "type": "action",
+        "data": {
+          "description": "Met à jour statut alerte et logue dans notif_log",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "postgres action",
+          "label": "UPDATE_Alerte_Notifiee",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "port": 6543,
+            "schemaName": "public",
+            "connectionTimeoutMillis": 5000,
+            "host": "aws-1-eu-west-2.pooler.supabase.com",
+            "database": "postgres",
+            "user": "postgres....",
+            "password": "...",
+            "operation": "Execute SQL query",
+            "executeQueryParams": {
+              "query": "UPDATE alertes SET statut = 'notifiee', updated_at = NOW() WHERE id = '{{outputs.Fusionner_Payload.success.alerte_id}}'; INSERT INTO notif_log (alerte_id, canal, destinataire, statut, sent_at) VALUES ('{{outputs.Fusionner_Payload.success.alerte_id}}', 'email_slack', 'equipe_production', 'envoye', NOW())"
+            },
+            "tableName": "alertes "
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 47.398641406644515,
+          "y": 1811.0767135096667
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "rcpq2jvwc733fb5tx3h2bmq7",
+        "type": "trigger",
+        "data": {
+          "description": "Déclenche le rapport GMP chaque soir à 23h00",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "cron",
+          "label": "CRON_23h00",
+          "inputs": {},
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "schedule": "0 23 * * *"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 259.3986414066445,
+          "y": 1693.0767135096667
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "nb0u1okovdszegbkcvcj5y0p",
+        "type": "action",
+        "data": {
+          "description": "Agrège les métriques du jour par équipement (AVG/MIN/MAX/conformité)",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "postgres action",
+          "label": "Agreger_Metriques",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "port": 6543,
+            "schemaName": "public",
+            "connectionTimeoutMillis": 5000,
+            "host": "aws-1-eu-west-2.pooler.supabase.com",
+            "database": "postgres",
+            "user": "postgres....",
+            "password": "...",
+            "operation": "Execute SQL query",
+            "executeQueryParams": {
+              "query": "SELECT e.code_machine, e.nom AS nom_equipement, e.zone_production, e.criticite_gmp, m.type_mesure, sc.seuil_min, sc.seuil_max, sc.unite, COUNT(m.id) AS nb_mesures, ROUND(AVG(m.valeur)::numeric,2) AS moyenne, ROUND(MIN(m.valeur)::numeric,2) AS minimum, ROUND(MAX(m.valeur)::numeric,2) AS maximum, COUNT(m.id) FILTER (WHERE m.alerte_flag = true) AS nb_alertes, ROUND((COUNT(m.id) FILTER (WHERE m.alerte_flag = false))::numeric / NULLIF(COUNT(m.id),0) * 100, 1) AS taux_conformite FROM mesures m JOIN capteurs c ON c.id = m.capteur_id JOIN equipements e ON e.id = c.equipement_id JOIN seuils_config sc ON sc.equipement_id = e.id AND sc.type_mesure = m.type_mesure WHERE m.timestamp >= CURRENT_DATE AND m.timestamp < CURRENT_DATE + INTERVAL '1 day' GROUP BY e.code_machine, e.nom, e.zone_production, e.criticite_gmp, m.type_mesure, sc.seuil_min, sc.seuil_max, sc.unite ORDER BY e.code_machine, m.type_mesure"
+            },
+            "tableName": "equipements"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 271.3986414066445,
+          "y": 1975.0767135096667
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "aebmofigogkqd5tghhbbyxo5",
+        "type": "action",
+        "data": {
+          "description": "Récupère toutes les alertes critiques et majeures de la journée",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "postgres action",
+          "label": "Recuperer_Alertes_Jour",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "port": 6543,
+            "schemaName": "public",
+            "connectionTimeoutMillis": 5000,
+            "host": "aws-1-eu-west-2.pooler.supabase.com",
+            "database": "postgres",
+            "user": "postgres....",
+            "password": "...",
+            "operation": "Execute SQL query",
+            "executeQueryParams": {
+              "query": "SELECT a.criticite_gmp, a.type_anomalie, a.valeur_detectee, a.message, a.lot_impacte, a.timestamp, e.code_machine, e.nom AS nom_equipement, e.zone_production FROM alertes a JOIN equipements e ON e.id = a.equipement_id WHERE a.timestamp >= CURRENT_DATE AND a.timestamp < CURRENT_DATE + INTERVAL '1 day' ORDER BY a.criticite_gmp DESC, a.timestamp DESC"
+            },
+            "tableName": "alertes",
+            "replaceEmptyStringWithNull": false,
+            "selectParams": {
+              "returnAll": false
+            },
+            "insertParams": {
+              "skipOnConflict": false
+            },
+            "deleteParams": {
+              "cascade": false
+            }
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 543.3986414066445,
+          "y": 1847.0767135096667
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "t675omlq0qhd9hkmp8csf7pm",
+        "type": "utility",
+        "data": {
+          "description": "Attend les deux requêtes Postgres avant de déclencher l'agent — évite la double exécution",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "merge",
+          "label": "Merge_Donnees_Rapport",
+          "inputs": {
+            "input1": {
+              "label": "input1"
+            },
+            "input2": {
+              "label": "input2"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "inputCount": 2,
+            "strategy": "zip"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 855.3986414066445,
+          "y": 2059.0767135096667
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "msv4rkt03o50ec71aqz9w9na",
+        "type": "agent-llm",
+        "data": {
+          "description": "Modèle Gemini pour génération du rapport GMP",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "google-llm",
+          "label": "Google_LLM_04",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "apiKey": "AIzaSyB5KJ4Jesp8mAGnDDpH8gl7s8hB_Q5jZSI",
+            "model": "gemini-3.1-flash-lite-preview"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 867.3986414066445,
+          "y": 1871.0767135096667
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "j15nbcrh3sl9no53yd79v78c",
+        "type": "agent",
+        "data": {
+          "description": "Rédige le rapport GMP quotidien depuis les métriques et alertes agrégées",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "agent",
+          "label": "Agent_Rapport_GMP",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "threadId": "indupharma_daily_gmp_report",
+            "systemPrompt": "Tu es un expert en conformité pharmaceutique GMP pour le site INDUPHARMA.\n\nMétriques du jour par équipement :\n{{outputs.Agreger_Metriques.success}}\n\nAlertes enregistrées aujourd'hui :\n{{outputs.Recuperer_Alertes_Jour.success}}\n\nAnalyse ces données et génère un rapport GMP quotidien.\nIMPORTANT : Ta réponse finale DOIT être UNIQUEMENT un objet JSON valide, sans balises markdown (pas de ```json), respectant EXACTEMENT la structure suivante :\n\n{\n  \"statut_global\": \"CONFORME\" | \"SURVEILLANCE\" | \"NON CONFORME\",\n  \"rapport_texte\": {\n    \"resume_equipements\": \"Résumé texte des équipements (taux conformité, incidents)\",\n    \"alertes_impacts\": \"Détail texte des alertes critiques et des lots impactés (si aucun, écrire 'Aucun lot impacté')\",\n    \"recommandations\": \"Recommandations d'action factuelles\"\n  }\n}\n\nRègles de décision pour \"statut_global\" :\n- \"NON CONFORME\" : S'il y a au moins une alerte critique affectant un lot de production.\n- \"SURVEILLANCE\" : Si le taux de conformité d'un équipement majeur baisse ou s'il y a des dérives hors-normes sans impact de lot.\n- \"CONFORME\" : Fonctionnement normal, aucun incident critique."
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 1099.3986414066446,
+          "y": 1883.0767135096667
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "yohzfullpddp1uunaqb43coi",
+        "type": "action",
+        "data": {
+          "description": "Formate le texte de l'agent en objet structuré avec date et statut",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "function",
+          "label": "Formater_Rapport",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "code": "const rapport_texte = typeof input === 'string' ? input : JSON.stringify(input);\nconst date_rapport  = new Date().toISOString().slice(0, 10);\nconst statut = rapport_texte.includes('NON CONFORME') ? 'NON CONFORME'\n             : rapport_texte.includes('SURVEILLANCE') ? 'SURVEILLANCE'\n             : 'CONFORME';\n\nreturn {\n  date_rapport,\n  statut_global: statut,\n  rapport_texte,\n  sujet_email: '[Rapport GMP ' + date_rapport + '] ' + statut + ' — INDUPHARMA'\n};"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 1331.3986414066446,
+          "y": 1895.0767135096667
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "cxq6j3laxrpk352thyayrpv7",
+        "type": "action",
+        "data": {
+          "description": "Envoie le rapport GMP quotidien par email au responsable qualité",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "gmail",
+          "label": "Email_Rapport_QA",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "operation": "send",
+            "to": "ezzi.mohammed1@yahoo.fr",
+            "subject": "{{outputs.Formater_Rapport.success.sujet_email}}",
+            "text": "{{outputs.Formater_Rapport.success.rapport_texte}}",
+            "attachments": []
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 1563.3986414066446,
+          "y": 1907.0767135096667
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "...",
+        "type": "action",
+        "data": {
+          "description": "Résumé Slack du rapport GMP quotidien",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "slack-action",
+          "label": "Slack_Rapport_Quotidien",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "operation": "message",
+            "messageOperation": "send",
+            "token": "xoxb-.....",
+            "text": "📊 *Rapport GMP du {{outputs.Formater_Rapport.success.date_rapport}}*\nStatut: *{{outputs.Formater_Rapport.success.statut_global}}*\nRapport envoyé par email au responsable QA.",
+            "messageChannelId": "C0AMP197XUY"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 1795.3986414066446,
+          "y": 1919.0767135096667
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "rjgnwwcwj39tylnppjymzknl",
+        "type": "display",
+        "data": {
+          "description": "Log du rapport GMP envoyé",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log_Rapport_Envoye",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 183.65682523734887,
+          "y": 2432.5095738273185
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "vug2y2v8zf6cu492khq7g3o0",
+        "type": "trigger",
+        "data": {
+          "description": "Expose le GET /api/production/status pour le tableau de bord",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "webhook",
+          "label": "WF05_Webhook",
+          "inputs": {},
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "method": "get",
+            "respondType": "deferred",
+            "responseCode": 200,
+            "path": "/api/production/status"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 395.65682523734887,
+          "y": 2444.5095738273185
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "fae3c4q9h0fpjvugapps2esl",
+        "type": "action",
+        "data": {
+          "description": "Récupère statut temps réel de tous les équipements avec dernières mesures",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "postgres action",
+          "label": "Query_Dashboard",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "port": 6543,
+            "schemaName": "public",
+            "connectionTimeoutMillis": 5000,
+            "host": "aws-1-eu-west-2.pooler.supabase.com",
+            "database": "postgres",
+            "user": "postgres.....",
+            "password": "...",
+            "operation": "Execute SQL query",
+            "executeQueryParams": {
+              "query": "WITH derniere_mesure AS (SELECT DISTINCT ON (c.equipement_id, m.type_mesure) c.equipement_id, m.type_mesure, m.valeur, m.unite, m.alerte_flag, m.timestamp FROM mesures m JOIN capteurs c ON c.id = m.capteur_id ORDER BY c.equipement_id, m.type_mesure, m.timestamp DESC), mesures_par_equipement AS (SELECT equipement_id, JSON_AGG(JSON_BUILD_OBJECT('type_mesure', type_mesure, 'valeur', valeur, 'unite', unite, 'alerte_flag', alerte_flag, 'timestamp', timestamp)) AS mesures_recentes FROM derniere_mesure GROUP BY equipement_id), alerte_active AS (SELECT equipement_id, COUNT(*) AS nb_alertes_ouvertes, JSON_AGG(DISTINCT root_cause) FILTER (WHERE root_cause IS NOT NULL AND root_cause <> '') AS root_causes FROM alertes WHERE statut = 'ouverte' GROUP BY equipement_id), techniciens_par_equipement AS (SELECT a.equipement_id, JSON_AGG(JSON_BUILD_OBJECT('name', t.name, 'role', t.role, 'is_available', t.is_available, 'email', t.email, 'phone', t.phone, 'action_taken', i.action_taken, 'started_at', i.started_at, 'completed_at', i.completed_at) ORDER BY i.started_at DESC) AS techniciens FROM interventions i JOIN alertes a ON a.id = i.incident_id JOIN technicians t ON t.id = i.technician_id GROUP BY a.equipement_id) SELECT e.id AS equipement_id, e.code_machine, e.nom, e.zone_production, e.type AS type_equipement, e.criticite_gmp, e.statut, COALESCE(aa.nb_alertes_ouvertes, 0) AS nb_alertes_ouvertes, aa.root_causes, mpe.mesures_recentes, tpe.techniciens FROM equipements e LEFT JOIN mesures_par_equipement mpe ON mpe.equipement_id = e.id LEFT JOIN alerte_active aa ON aa.equipement_id = e.id LEFT JOIN techniciens_par_equipement tpe ON tpe.equipement_id = e.id ORDER BY e.zone_production, e.code_machine;"
+            },
+            "tableName": "capteurs",
+            "replaceEmptyStringWithNull": false,
+            "selectParams": {
+              "returnAll": false
+            },
+            "insertParams": {
+              "skipOnConflict": false
+            },
+            "deleteParams": {
+              "cascade": false
+            }
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 607.6568252373488,
+          "y": 2456.5095738273185
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "cya5a3f2fd5ov19m4vsajbac",
+        "type": "action",
+        "data": {
+          "description": "Transforme les rows SQL en JSON structuré avec résumé global",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "function",
+          "label": "Transformer_JSON",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "code": "const rows = input.rows || [];\n\nconst equipements = rows.map(e => {\n  let mesures = [];\n  if (typeof e.mesures_recentes === 'string') {\n    try {\n      mesures = JSON.parse(e.mesures_recentes);\n    } catch {\n      mesures = [];\n    }\n  } else {\n    mesures = e.mesures_recentes || [];\n  }\n\n  let rootCauses = [];\n  if (typeof e.root_causes === 'string') {\n    try {\n      rootCauses = JSON.parse(e.root_causes);\n    } catch {\n      rootCauses = [];\n    }\n  } else if (Array.isArray(e.root_causes)) {\n    rootCauses = e.root_causes;\n  }\n  rootCauses = rootCauses.filter(rc => rc !== null && rc !== undefined && rc !== '');\n\n  const techniciens = Array.isArray(e.techniciens)\n    ? e.techniciens.map(t => ({\n        name: t.name,\n        role: t.role,\n        email: t.email,\n        phone: t.phone,\n        is_available:\n          typeof t.is_available === 'boolean'\n            ? t.is_available\n            : String(t.is_available).toLowerCase() === 'true',\n        action_taken: t.action_taken,\n        started_at: t.started_at,\n        completed_at: t.completed_at,\n        status: t.completed_at ? 'done' : 'in_progress'\n      }))\n    : [];\n\n  return {\n    equipement_id:       e.equipement_id,\n    code_machine:        e.code_machine,\n    nom:                 e.nom,\n    zone_production:     e.zone_production,\n    type_equipement:     e.type_equipement,\n    criticite_gmp:       e.criticite_gmp,\n    statut:              e.statut,\n    nb_alertes_ouvertes: parseInt(e.nb_alertes_ouvertes || 0),\n\n    etat_global: parseInt(e.nb_alertes_ouvertes || 0) > 0\n      ? 'alerte'\n      : 'ok',\n\n    root_causes: rootCauses,\n\n    mesures_recentes: mesures,\n\n    techniciens,\n\n    techniciens_count: techniciens.length,\n    techniciens_active: techniciens.filter(t => t.status === 'in_progress').length\n  };\n});\n\nconst nb_alertes_total   = equipements.reduce((s, e) => s + e.nb_alertes_ouvertes, 0);\nconst equipements_alerte = equipements.filter(e => e.etat_global === 'alerte').length;\nconst techniciens_total  = equipements.reduce((s, e) => s + e.techniciens_count, 0);\n\nreturn {\n  meta: JSON.stringify({\n    generated_at: new Date().toISOString(),\n    nb_equipements: equipements.length,\n    equipements_ok: equipements.length - equipements_alerte,\n    equipements_alerte,\n    nb_alertes_total,\n    techniciens_total\n  }),\n\n  data: JSON.stringify(equipements)\n};"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 819.6568252373488,
+          "y": 2348.5095738273185
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "ey6now9bdwind3102sgmrcah",
+        "type": "action",
+        "data": {
+          "description": "Répond au client HTTP avec le JSON structuré du dashboard",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "respond-to-webhook",
+          "label": "Repondre_Dashboard",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "responseCode": 200,
+            "responseBody": {
+              "meta": "{{outputs.Transformer_JSON.success.meta}}",
+              "equipements": "{{outputs.Transformer_JSON.success.data}}"
+            }
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 831.6568252373488,
+          "y": 2600.5095738273185
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "ebj308407iubhufx428q3mwk",
+        "type": "display",
+        "data": {
+          "description": "Log de la requête dashboard",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log_Dashboard",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": -156.17538391620715,
+          "y": 407.5823699607859
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "l902hm9vizxi184j7pn4qupr",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 415.97711192861084,
+          "y": 1360.2567570289243
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "pmhogqlhiz8y8lroxqeucoap",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log1",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": -196.34784303374394,
+          "y": 1255.504028608528
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "m66q5tp91vhbuivk85q6ex05",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log2",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 147.2938103574209,
+          "y": 1550.5896566192416
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "f1u17y10dyeo8pm5t5q8nvv3",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log3",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 1650.8193546005878,
+          "y": 1080.1047076307086
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "zgoe70588jo0q2pq3kck1w9n",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log4",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 1162.7465951791035,
+          "y": 79.74777294132127
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "pc525fj45w8dt9dcp5miuizi",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log5",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 1452.6603799572356,
+          "y": 540.0742946256238
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "sdap69pey2ua4oj76vxra4c6",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log6",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 1302.0443574460762,
+          "y": 935.4071982436615
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "nrbusni96mlmpwqpfz6nahvd",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log7",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 1190.3158411427944,
+          "y": 1353.8109290854757
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "rfg7yzdnrvrj8c48ahrhzo1q",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log8",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 595.3158472883695,
+          "y": 1027.8109324526313
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "c158zlu47tjkpfl4x37bq6ef",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log9",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 1391.3158390667263,
+          "y": 1607.8109264619866
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "xqmsrywd5q3rmx0lf220s53c",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log10",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 1034.3158427540714,
+          "y": 1594.8109265962596
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "ty6ons1l9y1iytetmtcjlj44",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log11",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 168.94706603205805,
+          "y": 2231.3186857240307
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "fsaval8kdtkrz917xfu5lyzo",
+        "type": "trigger",
+        "data": {
+          "description": "Triggers the workflow manually via a TCP message.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "manual-trigger",
+          "label": "Manual Trigger",
+          "inputs": {},
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 280.4362677342357,
+          "y": 2615.8185197857542
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "ulw1ne801oo6qac4063gtsmy",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log12",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 1162.962971383237,
+          "y": 2216.7029366106244
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "s7xjkppx3uwv042bjg04rqmf",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log13",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": -541.3076895262974,
+          "y": 597.0212808145216
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "rxho8iyi2613mbn6fwi5drzj",
+        "type": "trigger",
+        "data": {
+          "description": "Triggers workflow on incoming HTTP requests",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "webhook",
+          "label": "Webhook Trigger",
+          "inputs": {},
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "method": "post",
+            "respondType": "deferred",
+            "responseCode": 200,
+            "path": "/technicien"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": -441.69748502049987,
+          "y": 428.0233460700744
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "fbbfpi13ewvquodzn8mxlxvi",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log14",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": -179.99451577994117,
+          "y": 601.8501806702957
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "cm2ssjlraroozvqfpcg7wqaj",
+        "type": "action",
+        "data": {
+          "description": "Répond au client HTTP avec le JSON structuré du dashboard",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "respond-to-webhook",
+          "label": "Repondre_Dashboard1",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "responseCode": 200,
+            "responseBody": {
+              "message": "success is running"
+            }
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 530.508569051491,
+          "y": 54.80264747236383
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "b8yce5iwvim3uex2t1jvezsd",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log15",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 876.6626470687319,
+          "y": 35.57106059440404
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "ppywep8mlcnru9yc49rzj7wv",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log16",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 595.8157477349464,
+          "y": 450.6622092006133
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "oiwxdaj2six7h157ka7cf9lu",
+        "type": "action",
+        "data": {
+          "description": "Executes custom JavaScript code on the input data.",
+          "showRunningStatus": true,
+          "_morphing": false,
+          "name": "function",
+          "label": "Function",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {
+            "code": "return input.body"
+          },
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 729.9059248449075,
+          "y": 429.63306226093584
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "lhxs576bplwknla6wwlnr46d",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log17",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 473.0884711480603,
+          "y": 519.1512269951256
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "selected": false,
+        "id": "oppl3at7tvdis5oos4vbfxqu",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log18",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 242.04239870418445,
+          "y": 679.1841837299347
+        },
+        "width": 64,
+        "height": 64,
+        "selected": false,
+        "id": "butuu8jfcv63aqkt5pgnjskh",
+        "type": "action",
+        "data": {
+          "description": "Parse JSON string to object.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "parse-json",
+          "label": "Parse_JSON",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": null
+            },
+            "error": {
+              "label": "Error",
+              "isConnectable": null
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      },
+      {
+        "position": {
+          "x": 230.2863118581035,
+          "y": 386.36908839287867
+        },
+        "width": 256,
+        "height": 100,
+        "dragHandle": ".drag-handle__custom",
+        "id": "rsd1ezw9smjlfieqv92252dp",
+        "type": "display",
+        "data": {
+          "description": "Logs the input data to the console.",
+          "showRunningStatus": false,
+          "_morphing": false,
+          "name": "media-log",
+          "label": "Log19",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success",
+              "isConnectable": false
+            }
+          },
+          "parameters": {},
+          "defaultOutput": null
+        },
+        "inputs": null,
+        "outputs": null
+      }
+    ],
+    "connections": [
+      {
+        "type": "directed",
+        "id": "wf01-c01",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "ca77a210-41cd-4e43-858f-ed5933e87d26",
+        "target": "e9ceab8f-3a3e-462c-ab29-1f29eaa85b30",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "wf01-c02",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "e9ceab8f-3a3e-462c-ab29-1f29eaa85b30",
+        "target": "d7cddb1b-33b2-4acc-bc23-565190201e70",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "wf01-c03",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "d7cddb1b-33b2-4acc-bc23-565190201e70",
+        "target": "bcc41c99-5708-4979-b529-88a4f29f15b3",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "wf01-c04",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "bcc41c99-5708-4979-b529-88a4f29f15b3",
+        "target": "e8a5eaa7-4e75-4c92-829c-1e63d9bceba9",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "wf01-c06",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "e8a5eaa7-4e75-4c92-829c-1e63d9bceba9",
+        "target": "bdd2b337-9f97-420d-9845-01b694fa5cc4",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "wf01-c07",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "bdd2b337-9f97-420d-9845-01b694fa5cc4",
+        "target": "841fbbb9-57a3-4b1e-9fc3-932fedacaf99",
+        "sourceHandle": "true",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "hb5uz2j12fk6wuz9vyzz5tjd",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "dncyfrc5j6xcwr40dz4k885i",
+        "target": "z1125z5l853vwzl4h01y5k6i",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "agentConnection",
+        "id": "fjiubuz1ax3hc59p3i5zia0v",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "o0j1lxad1jstd5w6ndce0my2",
+        "target": "z1125z5l853vwzl4h01y5k6i",
+        "sourceHandle": "llm",
+        "targetHandle": "llm"
+      },
+      {
+        "type": "directed",
+        "id": "wbnb49exmg2itnc3zpqqnh2s",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "z1125z5l853vwzl4h01y5k6i",
+        "target": "l1ktyqzavk8rm64zhhipgp75",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "p9uhtzncgg7cv1g8687lpzo1",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "l1ktyqzavk8rm64zhhipgp75",
+        "target": "dmbk0q9gq3dgp9lf2pqk4dn1",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "u3dp2jen05uypc873n6mxgiw",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "dmbk0q9gq3dgp9lf2pqk4dn1",
+        "target": "d15uydezzr3maiwvwbdhdtdp",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "jnmdfy8kvu8apnhs50xkmh2t",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "x82gbx6laugwavpwvuoa2z2z",
+        "target": "dk0lxlwytof069twd87h44go",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "jwfqn590mxnisgsz7b5ye9rj",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "dk0lxlwytof069twd87h44go",
+        "target": "ex05q8esm63va9lt8f1t289k",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "dwc7nxawkbnab6fprcl3dve1",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "ex05q8esm63va9lt8f1t289k",
+        "target": "bng6u23cdvcx0trrp30bjmz4",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "nuj6ab63cb3rvheh3rj0yirm",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "bng6u23cdvcx0trrp30bjmz4",
+        "target": "wbx4rfasxn812apenmazbehp",
+        "sourceHandle": "case-1",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "kekjwwj4lj53zdl6bueinxkp",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "bng6u23cdvcx0trrp30bjmz4",
+        "target": "sqi7r4wr75ib9mka1q40nbu2",
+        "sourceHandle": "case-2",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "oh8po4ufgqp4b87ie4zojk8r",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "wbx4rfasxn812apenmazbehp",
+        "target": "mn49q25rebjwsvxcg462mxol",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "gtxl59dtyuulhdlpgq8c58iz",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "mn49q25rebjwsvxcg462mxol",
+        "target": "lc6a7kna2e7tfhiq62q8kjeb",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "yqtgzqklu4z7ipiqtg5qyvbl",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "sqi7r4wr75ib9mka1q40nbu2",
+        "target": "lc6a7kna2e7tfhiq62q8kjeb",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "fbnbskyuwntwd4sd4t8v7yhm",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "rcpq2jvwc733fb5tx3h2bmq7",
+        "target": "nb0u1okovdszegbkcvcj5y0p",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "mv8a4wonmzeih9zpiw5as884",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "rcpq2jvwc733fb5tx3h2bmq7",
+        "target": "aebmofigogkqd5tghhbbyxo5",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "o4vivmwbfscgr9g8d22krrnm",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "nb0u1okovdszegbkcvcj5y0p",
+        "target": "t675omlq0qhd9hkmp8csf7pm",
+        "sourceHandle": "success",
+        "targetHandle": "input1"
+      },
+      {
+        "type": "directed",
+        "id": "im248j6ud503mliypg7jrglx",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "aebmofigogkqd5tghhbbyxo5",
+        "target": "t675omlq0qhd9hkmp8csf7pm",
+        "sourceHandle": "success",
+        "targetHandle": "input2"
+      },
+      {
+        "type": "directed",
+        "id": "zkobj2d6k8i6wpb3zuhk8q09",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "t675omlq0qhd9hkmp8csf7pm",
+        "target": "j15nbcrh3sl9no53yd79v78c",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "agentConnection",
+        "id": "ruicpbe3xe8my1dadr5m8d0n",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "msv4rkt03o50ec71aqz9w9na",
+        "target": "j15nbcrh3sl9no53yd79v78c",
+        "sourceHandle": "llm",
+        "targetHandle": "llm"
+      },
+      {
+        "type": "directed",
+        "id": "v5qpgjapi4tjqhc40p1nk0n4",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "j15nbcrh3sl9no53yd79v78c",
+        "target": "yohzfullpddp1uunaqb43coi",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "quf0rs7ynv70gencio1k5qlk",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "yohzfullpddp1uunaqb43coi",
+        "target": "cxq6j3laxrpk352thyayrpv7",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "jf98cjumo306q9w2dt7veovg",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "cxq6j3laxrpk352thyayrpv7",
+        "target": "t9z7z1yato1b4zmkxx5b00og",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "e8i8jpp3devtv8w2ui1i6ooo",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "t9z7z1yato1b4zmkxx5b00og",
+        "target": "rjgnwwcwj39tylnppjymzknl",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "kum48b6pg1bviyca7pyix6uc",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "vug2y2v8zf6cu492khq7g3o0",
+        "target": "fae3c4q9h0fpjvugapps2esl",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "f1jepfmanundo0p6t3m23w1e",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "fae3c4q9h0fpjvugapps2esl",
+        "target": "cya5a3f2fd5ov19m4vsajbac",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "ue52pnvb11bwzmcyubheik39",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "cya5a3f2fd5ov19m4vsajbac",
+        "target": "ey6now9bdwind3102sgmrcah",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "h2lh5n39a1og77fpfrqjjspo",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "cya5a3f2fd5ov19m4vsajbac",
+        "target": "ebj308407iubhufx428q3mwk",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__rcpq2jvwc733fb5tx3h2bmq7success-f1u17y10dyeo8pm5t5q8nvv3input",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "rcpq2jvwc733fb5tx3h2bmq7",
+        "target": "f1u17y10dyeo8pm5t5q8nvv3",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__ca77a210-41cd-4e43-858f-ed5933e87d26success-l902hm9vizxi184j7pn4quprinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "ca77a210-41cd-4e43-858f-ed5933e87d26",
+        "target": "l902hm9vizxi184j7pn4qupr",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__lc6a7kna2e7tfhiq62q8kjebsuccess-zgoe70588jo0q2pq3kck1w9ninput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "lc6a7kna2e7tfhiq62q8kjeb",
+        "target": "zgoe70588jo0q2pq3kck1w9n",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__e8a5eaa7-4e75-4c92-829c-1e63d9bceba9success-pc525fj45w8dt9dcp5miuiziinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "e8a5eaa7-4e75-4c92-829c-1e63d9bceba9",
+        "target": "pc525fj45w8dt9dcp5miuizi",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__dmbk0q9gq3dgp9lf2pqk4dn1success-sdap69pey2ua4oj76vxra4c6input",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "dmbk0q9gq3dgp9lf2pqk4dn1",
+        "target": "sdap69pey2ua4oj76vxra4c6",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__mn49q25rebjwsvxcg462mxolsuccess-nrbusni96mlmpwqpfz6nahvdinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "mn49q25rebjwsvxcg462mxol",
+        "target": "nrbusni96mlmpwqpfz6nahvd",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__sqi7r4wr75ib9mka1q40nbu2success-rfg7yzdnrvrj8c48ahrhzo1qinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "sqi7r4wr75ib9mka1q40nbu2",
+        "target": "rfg7yzdnrvrj8c48ahrhzo1q",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__ex05q8esm63va9lt8f1t289ksuccess-c158zlu47tjkpfl4x37bq6efinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "ex05q8esm63va9lt8f1t289k",
+        "target": "c158zlu47tjkpfl4x37bq6ef",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__yohzfullpddp1uunaqb43coisuccess-xqmsrywd5q3rmx0lf220s53cinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "yohzfullpddp1uunaqb43coi",
+        "target": "xqmsrywd5q3rmx0lf220s53c",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__j15nbcrh3sl9no53yd79v78csuccess-ty6ons1l9y1iytetmtcjlj44input",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "j15nbcrh3sl9no53yd79v78c",
+        "target": "ty6ons1l9y1iytetmtcjlj44",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__x82gbx6laugwavpwvuoa2z2zsuccess-m66q5tp91vhbuivk85q6ex05input",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "x82gbx6laugwavpwvuoa2z2z",
+        "target": "m66q5tp91vhbuivk85q6ex05",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__fsaval8kdtkrz917xfu5lyzosuccess-fae3c4q9h0fpjvugapps2eslinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "fsaval8kdtkrz917xfu5lyzo",
+        "target": "fae3c4q9h0fpjvugapps2esl",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__fae3c4q9h0fpjvugapps2eslsuccess-ulw1ne801oo6qac4063gtsmyinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "fae3c4q9h0fpjvugapps2esl",
+        "target": "ulw1ne801oo6qac4063gtsmy",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__ey6now9bdwind3102sgmrcahsuccess-s7xjkppx3uwv042bjg04rqmfinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "ey6now9bdwind3102sgmrcah",
+        "target": "s7xjkppx3uwv042bjg04rqmf",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__rxho8iyi2613mbn6fwi5drzjsuccess-cm2ssjlraroozvqfpcg7wqajinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "rxho8iyi2613mbn6fwi5drzj",
+        "target": "cm2ssjlraroozvqfpcg7wqaj",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__rxho8iyi2613mbn6fwi5drzjsuccess-fbbfpi13ewvquodzn8mxlxviinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "rxho8iyi2613mbn6fwi5drzj",
+        "target": "fbbfpi13ewvquodzn8mxlxvi",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__e9ceab8f-3a3e-462c-ab29-1f29eaa85b30success-b8yce5iwvim3uex2t1jvezsdinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "e9ceab8f-3a3e-462c-ab29-1f29eaa85b30",
+        "target": "b8yce5iwvim3uex2t1jvezsd",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__bcc41c99-5708-4979-b529-88a4f29f15b3success-ppywep8mlcnru9yc49rzj7wvinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "bcc41c99-5708-4979-b529-88a4f29f15b3",
+        "target": "ppywep8mlcnru9yc49rzj7wv",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__oiwxdaj2six7h157ka7cf9lusuccess-lhxs576bplwknla6wwlnr46dinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "oiwxdaj2six7h157ka7cf9lu",
+        "target": "lhxs576bplwknla6wwlnr46d",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__ytwf1d2voo4e4udygq5bknl1success-oppl3at7tvdis5oos4vbfxquinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "ytwf1d2voo4e4udygq5bknl1",
+        "target": "oppl3at7tvdis5oos4vbfxqu",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__nvik39q3pjy078mpufsl0264success-oiwxdaj2six7h157ka7cf9luinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "nvik39q3pjy078mpufsl0264",
+        "target": "oiwxdaj2six7h157ka7cf9lu",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__nvik39q3pjy078mpufsl0264success-butuu8jfcv63aqkt5pgnjskhinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "nvik39q3pjy078mpufsl0264",
+        "target": "butuu8jfcv63aqkt5pgnjskh",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__butuu8jfcv63aqkt5pgnjskhsuccess-rsd1ezw9smjlfieqv92252dpinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "butuu8jfcv63aqkt5pgnjskh",
+        "target": "rsd1ezw9smjlfieqv92252dp",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__butuu8jfcv63aqkt5pgnjskhsuccess-ytwf1d2voo4e4udygq5bknl1input",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "butuu8jfcv63aqkt5pgnjskh",
+        "target": "ytwf1d2voo4e4udygq5bknl1",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__ytwf1d2voo4e4udygq5bknl1success-dncyfrc5j6xcwr40dz4k885iinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "ytwf1d2voo4e4udygq5bknl1",
+        "target": "dncyfrc5j6xcwr40dz4k885i",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__dk0lxlwytof069twd87h44gosuccess-pmhogqlhiz8y8lroxqeucoapinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "dk0lxlwytof069twd87h44go",
+        "target": "pmhogqlhiz8y8lroxqeucoap",
+        "sourceHandle": "success",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__bng6u23cdvcx0trrp30bjmz4case-2-lc6a7kna2e7tfhiq62q8kjebinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "bng6u23cdvcx0trrp30bjmz4",
+        "target": "lc6a7kna2e7tfhiq62q8kjeb",
+        "sourceHandle": "case-2",
+        "targetHandle": "input"
+      },
+      {
+        "type": "directed",
+        "id": "xy-edge__bng6u23cdvcx0trrp30bjmz4case-1-lc6a7kna2e7tfhiq62q8kjebinput",
+        "data": {
+          "isAnimated": false
+        },
+        "source": "bng6u23cdvcx0trrp30bjmz4",
+        "target": "lc6a7kna2e7tfhiq62q8kjeb",
+        "sourceHandle": "case-1",
+        "targetHandle": "input"
+      }
+    ],
+    "status": "stopped",
+    "id": "f1c96c02-f16d-46a0-8c3e-37e65ffd4583",
+    "createdAt": 1777374284136,
+    "updatedAt": "2026-04-30T02:17:28.844Z",
+    "userId": "956d98bd-947e-411d-bab0-1b83c21d768a",
+    "previousStatus": "running"
+  }
+]
